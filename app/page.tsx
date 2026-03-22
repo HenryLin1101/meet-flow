@@ -15,6 +15,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Plus, Users, Calendar, User, CalendarCheck } from "lucide-react";
+import { ConfirmMeetingActions } from "@/components/ConfirmMeeting";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -95,10 +96,14 @@ type DragState = {
 function ScheduleGrid({
   availability,
   onBatchToggle,
+  onToggle,
+  selectedSlot,
   emerald = false,
 }: {
   availability: TimeSlot[];
   onBatchToggle?: (slots: TimeSlot[], fill: boolean) => void;
+  onToggle?: (day: number, hour: number) => void;
+  selectedSlot?: TimeSlot | null;
   emerald?: boolean;
 }) {
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -155,26 +160,33 @@ function ScheduleGrid({
               {DAYS.map((_, d) => {
                 const s = slot(d, h);
                 const active = availability.includes(s);
-                const inRect = inDragRect(d, hi);
+                const inRect =
+                  !!onBatchToggle && !!drag && inDragRect(d, hi);
+                const isSelected = selectedSlot != null && selectedSlot === s;
 
                 let cellClass: string;
                 if (inRect) {
-                  // Preview: show what the result will be
                   cellClass = drag!.filling
                     ? "bg-primary/60 border-primary/60"
                     : "bg-muted border-border opacity-40";
                 } else if (active) {
                   cellClass = emerald
-                    ? "bg-emerald-400 border-emerald-400"
-                    : "bg-primary border-primary";
+                    ? isSelected
+                      ? "bg-emerald-400 border-emerald-400 ring-2 ring-emerald-700 ring-offset-2 ring-offset-background"
+                      : "bg-emerald-400 border-emerald-400"
+                    : isSelected
+                      ? "bg-primary border-primary ring-2 ring-primary ring-offset-2 ring-offset-background"
+                      : "bg-primary border-primary";
                 } else {
                   cellClass = "bg-muted border-border hover:bg-muted/60";
                 }
-
                 return (
                   <td key={d} className="p-0.5">
                     <div
-                      className={`h-8 rounded border transition-colors ${cellClass} ${onBatchToggle ? "cursor-pointer" : "cursor-default"}`}
+                      className={`h-8 rounded border transition-colors ${cellClass} ${onBatchToggle || onToggle ? "cursor-pointer" : "cursor-default"}`}
+                      onClick={() => {
+                        if (onToggle && active) onToggle(d, h);
+                      }}
                       onMouseDown={(e) => {
                         if (!onBatchToggle) return;
                         e.preventDefault();
@@ -227,6 +239,11 @@ export default function MeetFlow() {
   const [newName, setNewName] = useState("");
   const [open, setOpen] = useState(false);
   const [viewId, setViewId] = useState("xiao-liang");
+  const [selectedCommonSlot, setSelectedCommonSlot] = useState<TimeSlot | null>(
+    null
+  );
+  const [confirmedMeetingTime, setConfirmedMeetingTime] =
+    useState<TimeSlot | null>(null);
 
   const me = members.find((m) => m.id === "me")!;
   const others = members.filter((m) => m.id !== "me");
@@ -237,6 +254,26 @@ export default function MeetFlow() {
       members.every((m) => m.availability.includes(slot(d, h)))
     ).map((h) => slot(d, h))
   );
+
+  useEffect(() => {
+    if (selectedCommonSlot && !commonSlots.includes(selectedCommonSlot)) {
+      setSelectedCommonSlot(null);
+    }
+    if (confirmedMeetingTime && !commonSlots.includes(confirmedMeetingTime)) {
+      setConfirmedMeetingTime(null);
+    }
+  }, [commonSlots, selectedCommonSlot, confirmedMeetingTime]);
+
+  function selectCommonSlot(day: number, hour: number) {
+    const s = slot(day, hour);
+    if (!commonSlots.includes(s)) return;
+    setSelectedCommonSlot((prev) => (prev === s ? null : s));
+  }
+
+  function confirmMeetingTime() {
+    if (!selectedCommonSlot) return;
+    setConfirmedMeetingTime(selectedCommonSlot);
+  }
 
   function batchToggleMySlots(slots: TimeSlot[], fill: boolean) {
     setMembers((prev) =>
@@ -473,25 +510,52 @@ export default function MeetFlow() {
                     目前沒有共同空閒時段
                   </p>
                 ) : (
-                  <ScheduleGrid availability={commonSlots} emerald />
+                  <ScheduleGrid
+                    availability={commonSlots}
+                    emerald
+                    selectedSlot={selectedCommonSlot}
+                    onToggle={selectCommonSlot}
+                  />
                 )}
               </CardContent>
             </Card>
 
             {commonSlots.length > 0 && (
-              <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {commonSlots.map((s) => {
-                  const [d, h] = s.split("-").map(Number);
-                  return (
-                    <div
-                      key={s}
-                      className="text-sm px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-200"
-                    >
-                      {DAYS[d]} {h}:00–{h + 1}:00
-                    </div>
-                  );
-                })}
-              </div>
+              <>
+                <p className="mt-4 text-sm text-muted-foreground">
+                  點選格線或下方時段以選擇要確認的會議時間
+                </p>
+                <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                  {commonSlots.map((s) => {
+                    const [d, h] = s.split("-").map(Number);
+                    const isSelected = selectedCommonSlot === s;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() =>
+                          setSelectedCommonSlot((prev) =>
+                            prev === s ? null : s
+                          )
+                        }
+                        className={`text-left text-sm px-3 py-2 rounded-lg border transition-colors ${
+                          isSelected
+                            ? "border-emerald-600 bg-emerald-100 text-emerald-900 ring-2 ring-emerald-600 ring-offset-2 ring-offset-background dark:bg-emerald-900 dark:border-emerald-500 dark:text-emerald-100"
+                            : "bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-200"
+                        }`}
+                      >
+                        {DAYS[d]} {h}:00–{h + 1}:00
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <ConfirmMeetingActions
+                  selectedSlot={selectedCommonSlot}
+                  confirmedMeetingTime={confirmedMeetingTime}
+                  onConfirm={confirmMeetingTime}
+                />
+              </>
             )}
           </TabsContent>
         </Tabs>
